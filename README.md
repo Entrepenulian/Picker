@@ -16,6 +16,12 @@ Grab any pixel on screen as HEX / RGB / HSL — or click any text in any app to 
 &nbsp;&nbsp;
 <img src="assets/fonts-state.png" height="330" alt="Picker's Fonts section showing a grabbed font's specimen and saved fonts">
 
+<br><br>
+
+<img src="assets/grab-font.png" width="600" alt="Grab Font in action: the overlay highlights a heading on a web page and reads its family, weight, and size">
+
+<sub><i>Grab Font reading a heading straight off a web page — family, weight, and size.</i></sub>
+
 </div>
 
 ---
