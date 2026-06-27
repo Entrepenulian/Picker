@@ -50,8 +50,17 @@ cat > "${APP_DIR}/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# Ad-hoc sign so Liquid Glass and the color sampler run without Gatekeeper friction.
-codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+# Sign with a STABLE identity when one is in the keychain. The Accessibility (TCC)
+# grant keys on the signing identity + bundle id — NOT the binary hash — so a stably
+# signed app stays authorized across rebuilds (ad-hoc resets the grant every build,
+# which is why "Grab Font" kept needing re-permitting). Falls back to ad-hoc.
+SIGN_ID="Developer ID Application: Julian Hahne (YU2HWLYNN7)"
+if security find-identity -v -p codesigning 2>/dev/null | grep -q "$SIGN_ID"; then
+    codesign --force --deep --sign "$SIGN_ID" "$APP_DIR" >/dev/null 2>&1 \
+        || codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+else
+    codesign --force --deep --sign - "$APP_DIR" >/dev/null 2>&1 || true
+fi
 
 echo "==> Done: ${APP_DIR}"
 echo "    Launch with: open \"${APP_DIR}\""
