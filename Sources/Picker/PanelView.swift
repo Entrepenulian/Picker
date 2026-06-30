@@ -74,7 +74,6 @@ struct PanelView: View {
 
     @ViewBuilder private var fontsSection: some View {
         FontHeroCard(picked: shownFont(), onCopy: { copy($0) }, onFind: openURL)
-            .animation(Motion.settle, value: shownFont())
 
         GrabFontButton(isPicking: app.isPickingFont, action: onGrabFont)
 
@@ -628,6 +627,30 @@ private struct SectionSwitch: View {
 
 // MARK: - Font specimen card
 
+/// "Text states swap" (transitions.dev): the outgoing details blur and glide up and
+/// out while the incoming details blur in from just below — an in-place content swap,
+/// not a hard cut.
+private struct FontDetailSwap: ViewModifier {
+    var y: CGFloat
+    var blur: CGFloat
+    var opacity: Double
+    func body(content: Content) -> some View {
+        content.opacity(opacity).blur(radius: blur).offset(y: y)
+    }
+}
+
+extension AnyTransition {
+    fileprivate static var fontDetails: AnyTransition {
+        .asymmetric(
+            insertion: .modifier(
+                active: FontDetailSwap(y: 6, blur: 3, opacity: 0),
+                identity: FontDetailSwap(y: 0, blur: 0, opacity: 1)),
+            removal: .modifier(
+                active: FontDetailSwap(y: -6, blur: 3, opacity: 0),
+                identity: FontDetailSwap(y: 0, blur: 0, opacity: 1)))
+    }
+}
+
 private struct FontHeroCard: View {
     var picked: PickedFont?
     var onCopy: (String) -> Void
@@ -638,65 +661,78 @@ private struct FontHeroCard: View {
     @State private var copyToken = 0
 
     var body: some View {
-        Group {
-            if let picked { filled(picked) } else { empty }
+        let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+        return Group {
+            if let picked {
+                ZStack(alignment: .topLeading) {
+                    // Static card — persists across font swaps, so only the data moves.
+                    shape.fill(Color.primary.opacity(0.04))
+                        .overlay(shape.stroke(Hairline.soft, lineWidth: 1))
+
+                    // Keyed by font id: selecting another saved font swaps the old set
+                    // out and the new set in with a blurred up-and-down crossfade.
+                    details(picked)
+                        .padding(Space.lg)
+                        .id(picked.id)
+                        .transition(.fontDetails)
+                }
+                .clipShape(shape)
+                .contentShape(shape)
+                .onTapGesture { copy(picked.family) }
+                .pointerStyle(.link)
+                .onHover { hovering = $0 }
+                .overlay(alignment: .bottomTrailing) { copyBadge }
+            } else {
+                empty
+            }
         }
         .frame(height: 168)
         .frame(maxWidth: .infinity)
+        .animation(Motion.fontSwap, value: picked?.id)
     }
 
-    private func filled(_ f: PickedFont) -> some View {
-        let shape = RoundedRectangle(cornerRadius: Radius.card, style: .continuous)
+    private func details(_ f: PickedFont) -> some View {
         let specimen = (f.sampleSnippet?.isEmpty == false) ? f.sampleSnippet! : "AaBbCcDd 0123"
-        return ZStack(alignment: .topLeading) {
-            shape.fill(Color.primary.opacity(0.04))
-                .overlay(shape.stroke(Hairline.soft, lineWidth: 1))
-
-            VStack(alignment: .leading, spacing: 0) {
-                HStack(alignment: .top, spacing: Space.sm) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(f.family)
-                            .font(.system(size: 15, weight: .semibold))
-                            .foregroundStyle(Ink.primary)
-                            .lineLimit(1)
-                        Text(metaLine(f))
-                            .font(TypeScale.caption)
-                            .foregroundStyle(Ink.tertiary)
-                            .lineLimit(1)
-                    }
-                    Spacer(minLength: Space.sm)
-                    findButton(f)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: Space.sm) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(f.family)
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(Ink.primary)
+                        .lineLimit(1)
+                    Text(metaLine(f))
+                        .font(TypeScale.caption)
+                        .foregroundStyle(Ink.tertiary)
+                        .lineLimit(1)
                 }
-
                 Spacer(minLength: Space.sm)
-
-                Text("AaBbCcDdEe")
-                    .font(.custom(f.family, size: 32))
-                    .foregroundStyle(Ink.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.6)
-                Text(specimen)
-                    .font(.custom(f.family, size: 15))
-                    .foregroundStyle(Ink.secondary)
-                    .lineLimit(1)
-                    .padding(.top, 4)
+                findButton(f)
             }
-            .padding(Space.lg)
+
+            Spacer(minLength: Space.sm)
+
+            Text("AaBbCcDdEe")
+                .font(.custom(f.family, size: 32))
+                .foregroundStyle(Ink.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+            Text(specimen)
+                .font(.custom(f.family, size: 15))
+                .foregroundStyle(Ink.secondary)
+                .lineLimit(1)
+                .padding(.top, 4)
         }
-        .contentShape(shape)
-        .onTapGesture { copy(f.family) }
-        .pointerStyle(.link)
-        .onHover { hovering = $0 }
-        .overlay(alignment: .bottomTrailing) {
-            Image(systemName: justCopied ? "checkmark" : "doc.on.doc")
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundStyle(justCopied ? Ink.secondary : Ink.tertiary)
-                .contentTransition(.symbolEffect(.replace))
-                .opacity(hovering || justCopied ? 1 : 0)
-                .padding(Space.md)
-                .animation(.easeInOut(duration: 0.16), value: justCopied)
-                .animation(.easeOut(duration: 0.18), value: hovering)
-        }
+    }
+
+    private var copyBadge: some View {
+        Image(systemName: justCopied ? "checkmark" : "doc.on.doc")
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(justCopied ? Ink.secondary : Ink.tertiary)
+            .contentTransition(.symbolEffect(.replace))
+            .opacity(hovering || justCopied ? 1 : 0)
+            .padding(Space.md)
+            .animation(.easeInOut(duration: 0.16), value: justCopied)
+            .animation(.easeOut(duration: 0.18), value: hovering)
     }
 
     private func metaLine(_ f: PickedFont) -> String {
