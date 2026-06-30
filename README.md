@@ -31,14 +31,14 @@ Grab any pixel on screen as HEX / RGB / HSL — or click any text in any app to 
 Picker lives in your menu bar. Click it and you get two tools behind one glass panel:
 
 - **Colors** — hit **Pick a Color** and your cursor becomes a magnified loupe. Line up the exact pixel anywhere on screen and click; the color drops in as HEX / RGB / HSL, ready to copy and saved to your palette.
-- **Fonts** — hit **Grab Font** and your cursor becomes a text picker. Hover any text in **Safari**, another app, or a dropdown — a crosshair highlights the exact run and reads its family and size — then click to keep it. The card shows a live specimen **in the font's real typeface** (downloading it if you don't already have it), and **Find** takes you to the font's source. A saved-fonts strip lets you flip between everything you've grabbed.
+- **Fonts** — hit **Grab Font** and your cursor becomes a text picker. Hover any text in **Safari or Chrome** (and other Chromium browsers), another app, or a dropdown — a crosshair highlights the exact run and reads its family and size — then click to keep it. The card shows a live specimen **in the font's real typeface** (downloading it if you don't already have it), and **Find** takes you to the font's source. A saved-fonts strip lets you flip between everything you've grabbed.
 
 A sliding pill switches between the two; nothing else moves.
 
 ## Features
 
 - **Magnified-pixel sampling** — the native loupe magnifies the screen pixel-by-pixel, so you grab the exact one every time.
-- **Grab any font, anywhere** — a click-through overlay reads the text *under* your cursor through the accessibility tree, so it works on web pages (Safari/WebKit), native apps, and even items in an already-open dropdown — highlighting the actual text run, never a surrounding box.
+- **Grab any font, anywhere** — a click-through overlay reads the text *under* your cursor through the accessibility tree, so it works on web pages (Safari/WebKit **and Chrome/Chromium**), native apps, and even items in an already-open dropdown — highlighting the actual text run, never a surrounding box. Chromium hides the font family from accessibility, so for those browsers Picker reads it straight from the page's computed style — and the hover label resolves instantly.
 - **Liquid Glass** — a real macOS 26 glass panel, not a mockup.
 - **HEX · RGB · HSL** — every color format at once; click a value to copy it and the icon flips to a checkmark.
 - **Real-typeface specimen** — every grabbed font renders in its *actual* face. If you don't have it installed, Picker fetches and registers it on the fly from the open-font catalog (Google Fonts, then Fontsource), so the preview is the real thing — even for variable fonts that hide behind an odd internal name. Faces you can't legally download fall back to a system preview.
