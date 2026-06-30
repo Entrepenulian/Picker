@@ -384,21 +384,27 @@ final class FontPicker {
         AXUIElementGetPid(e, &epid)
         if epid == ownPID { return nil }  // resolved to our own overlay — ignore
 
-        // Resolve to a real text leaf: the hit test usually lands on the AXStaticText
-        // directly, but on padding/edges it returns a container — descend to the text
-        // run under the point. Either way we only ever match actual text, so the
-        // highlight hugs the run and never the surrounding div/group/cell.
-        guard let textEl = textLeaf(from: e, at: ax) else { return nil }
-
-        // Who owns this text? The owner decides whether a missing font dictionary is
-        // fatal. Chromium's Blink tree routinely exposes the text run and its frame but
-        // *no* AXFont — there is no font attribute to read at all, especially right
-        // after launch. Safari/WebKit and native apps always carry AXFont, so for them a
-        // nil dictionary really does mean "not text". For Chromium we must NOT bail: we
-        // still highlight the run and read the real family from the page via JavaScript.
+        // Who owns this text? Chromium needs a different strategy on two fronts.
         let bundle = NSRunningApplication(processIdentifier: epid)?.bundleIdentifier
         let chromium = Self.isChromium(bundle)
 
+        // Resolve to the text run under the point. Safari/native land the hit test on (or
+        // just above) the AXStaticText, so descend from it. Chromium's system-wide hit
+        // test is unreliable — it routinely returns a giant scroll-container AXGroup whose
+        // children's frames don't even bracket the point, so descending finds nothing.
+        // Fall back to a position search from the app root, which walks down the branch
+        // whose frames actually contain the point and lands on the real run.
+        var resolved = textLeaf(from: e, at: ax)
+        if resolved == nil && chromium {
+            resolved = textRunByPosition(in: AXUIElementCreateApplication(epid), at: ax)
+        }
+        guard let textEl = resolved else { return nil }
+
+        // Chromium's Blink tree often exposes the text run and its frame but *no* AXFont —
+        // no font attribute to read at all, especially right after launch. Safari/WebKit
+        // and native apps always carry AXFont, so for them a nil dictionary really means
+        // "not text". For Chromium we must NOT bail: we still highlight the run and read
+        // the real family from the page via JavaScript.
         let font = fontDict(at: textEl)
         if font == nil && !chromium { return nil }  // unreadable and not JS-probeable → ignore
 
@@ -458,6 +464,42 @@ final class FontPicker {
             }
         }
         return nil
+    }
+
+    /// Locate a text run by geometry, used for Chromium where the hit test can't be
+    /// trusted to land on (or above) the run. Returns the deepest AXStaticText whose
+    /// frame contains the point, searched from `root` down only the branches whose frames
+    /// bracket it. Depth- and budget-capped so a pathological page can't stall a hover.
+    private func textRunByPosition(in root: AXUIElement, at p: CGPoint) -> AXUIElement? {
+        var budget = 1500
+        return deepestTextContaining(root, p, depth: 0, budget: &budget)
+    }
+
+    private func deepestTextContaining(
+        _ e: AXUIElement, _ p: CGPoint, depth: Int, budget: inout Int
+    ) -> AXUIElement? {
+        if depth > 60 || budget <= 0 { return nil }
+        budget -= 1
+
+        var best: AXUIElement? =
+            (axString(e, "AXRole") == "AXStaticText" && (frame(of: e)?.contains(p) ?? false))
+            ? e : nil
+
+        var childrenRef: AnyObject?
+        guard
+            AXUIElementCopyAttributeValue(e, "AXChildren" as CFString, &childrenRef) == .success,
+            let children = childrenRef as? [AXUIElement]
+        else { return best }
+
+        for child in children {
+            let f = frame(of: child)
+            if f == nil || f!.contains(p) {
+                if let found = deepestTextContaining(child, p, depth: depth + 1, budget: &budget) {
+                    best = found
+                }
+            }
+        }
+        return best
     }
 
     private func fontDict(at e: AXUIElement) -> NSDictionary? {
