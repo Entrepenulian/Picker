@@ -54,6 +54,9 @@ enum Motion {
     static let arrive = Animation.snappy(duration: 0.3, extraBounce: 0.02)
     /// Micro state (hover / press) — near-instant.
     static let micro = Animation.easeOut(duration: 0.13)
+    /// Swapping the data inside a card in place (e.g. the font hero on chip select)
+    /// — quick blur-and-glide, no bounce so the two states don't fight.
+    static let fontSwap = Animation.easeInOut(duration: 0.2)
 }
 
 // MARK: - Interaction styles
