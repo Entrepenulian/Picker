@@ -317,9 +317,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             guard let self else { return }
             self.app.isPickingFont = false
             if let picked {
-                self.fonts.add(picked)
-                Haptics.confirm()
-                self.app.sayFont("Saved \(picked.family)", ok: true)
+                if picked.family == "Unknown" {
+                    // Chromium browsers need their page JS opened up for us to read the
+                    // family (their accessibility tree doesn't expose it).
+                    self.app.sayFont(
+                        "Couldn't read the font. In Chrome: View ▸ Developer ▸ Allow "
+                            + "JavaScript from Apple Events", ok: false)
+                } else {
+                    self.fonts.add(picked)
+                    Haptics.confirm()
+                    self.app.sayFont("Saved \(picked.family)", ok: true)
+                }
             }
             self.showPanel()
         }
