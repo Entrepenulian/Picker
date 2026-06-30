@@ -93,6 +93,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
                 ("Playfair Display", 22.0, "Bold"),
                 ("Pacifico", 24.0, "Regular"),
                 ("Lobster", 28.0, "Regular"),
+                ("Bricolage Grotesque", 20.0, "Medium"),  // variable font — exercises renderName
             ] {
                 fonts.add(
                     PickedFont(
