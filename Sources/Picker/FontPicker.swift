@@ -371,32 +371,50 @@ final class FontPicker {
     // MARK: Accessibility reading
 
     private func readText(atAX ax: CGPoint) -> Hit? {
-        // The system-wide hit test descends straight to the deepest leaf — any text
-        // anywhere, including inside an open dropdown. Our overlay is click-through
-        // and accessibility-invisible, so the hit test reads through it.
+        // The system-wide hit test descends to the deepest leaf under the pointer. Our
+        // overlay is click-through and accessibility-invisible, so it reads through it.
         var elem: AXUIElement?
-        guard
+        let hitOK =
             AXUIElementCopyElementAtPosition(Self.systemWide, Float(ax.x), Float(ax.y), &elem)
-                == .success, let e = elem
-        else { return nil }
+            == .success
+        let hit = hitOK ? elem : nil
 
         var epid: pid_t = 0
-        AXUIElementGetPid(e, &epid)
+        if let hit { AXUIElementGetPid(hit, &epid) }
         if epid == ownPID { return nil }  // resolved to our own overlay — ignore
 
-        // Who owns this text? Chromium needs a different strategy on two fronts.
-        let bundle = NSRunningApplication(processIdentifier: epid)?.bundleIdentifier
-        let chromium = Self.isChromium(bundle)
+        // Who owns this text, and is it a Chromium browser? Chromium needs a different
+        // strategy on two fronts (geometry lookup + JS font), and crucially it must be
+        // reachable even when the hit test itself returned nothing: a freshly woken Blink
+        // tree answers slowly, so a cold hit test can blow the 0.25s budget and come back
+        // empty. When that happens but the foreground app is Chromium, drive the lookup
+        // from its app root anyway.
+        var bundle =
+            epid != 0 ? NSRunningApplication(processIdentifier: epid)?.bundleIdentifier : nil
+        var chromium = Self.isChromium(bundle)
+        if !chromium, hit == nil,
+            let front = NSWorkspace.shared.frontmostApplication,
+            Self.isChromium(front.bundleIdentifier)
+        {
+            epid = front.processIdentifier
+            bundle = front.bundleIdentifier
+            chromium = true
+        }
 
-        // Resolve to the text run under the point. Safari/native land the hit test on (or
-        // just above) the AXStaticText, so descend from it. Chromium's system-wide hit
-        // test is unreliable — it routinely returns a giant scroll-container AXGroup whose
-        // children's frames don't even bracket the point, so descending finds nothing.
-        // Fall back to a position search from the app root, which walks down the branch
-        // whose frames actually contain the point and lands on the real run.
-        var resolved = textLeaf(from: e, at: ax)
-        if resolved == nil && chromium {
-            resolved = textRunByPosition(in: AXUIElementCreateApplication(epid), at: ax)
+        // Resolve the text run under the point.
+        //  • Safari/native: the hit test lands on (or just above) the AXStaticText —
+        //    descend from it.
+        //  • Chromium: the hit test is unreliable — it returns a giant scroll-container
+        //    AXGroup whose children don't bracket the point (or nothing at all). Locate
+        //    the run by geometry from the app root instead.
+        var resolved: AXUIElement?
+        if let hit, !chromium {
+            resolved = textLeaf(from: hit, at: ax)
+        } else if chromium {
+            let root = AXUIElementCreateApplication(epid)
+            AXUIElementSetMessagingTimeout(root, 1.0)  // a cold Blink tree is slow to answer
+            resolved =
+                hit.flatMap { textLeaf(from: $0, at: ax) } ?? textRunByPosition(in: root, at: ax)
         }
         guard let textEl = resolved else { return nil }
 
