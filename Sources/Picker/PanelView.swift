@@ -709,12 +709,17 @@ private struct FontHeroCard: View {
 
             Spacer(minLength: 0)
 
+            // The specimen and sample are pinned by their TEXT BASELINE, not their box.
+            // Centering a fixed box still drifts because fonts have different
+            // ascent/descent; pinning `firstTextBaseline` to a constant offset keeps
+            // the bottom of the letters on the exact same line for every font.
             Text("AaBbCcDdEe")
                 .font(.custom(f.family, size: 32))
                 .foregroundStyle(Ink.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.6)
-                .frame(height: 42, alignment: .leading)
+                .alignmentGuide(.top) { $0[.firstTextBaseline] - 33 }
+                .frame(height: 46, alignment: .topLeading)
                 // Re-resolve Font.custom once the real face downloads — only this line,
                 // updated in place, so the card doesn't re-animate.
                 .id(fontReady)
@@ -722,8 +727,8 @@ private struct FontHeroCard: View {
                 .font(.custom(f.family, size: 15))
                 .foregroundStyle(Ink.secondary)
                 .lineLimit(1)
-                .frame(height: 20, alignment: .leading)
-                .padding(.top, 2)
+                .alignmentGuide(.top) { $0[.firstTextBaseline] - 14 }
+                .frame(height: 22, alignment: .topLeading)
                 .id(fontReady)
         }
     }
