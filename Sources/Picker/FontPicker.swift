@@ -35,6 +35,27 @@ final class FontPicker {
         var font: PickedFont
         /// Text bounds in global AppKit (bottom-left) coordinates.
         var frame: CGRect
+        /// Set to a Chromium browser's bundle id when the family came back "Unknown"
+        /// — Chromium's AX exposes size/weight but not the typeface, so we read the
+        /// family from the page itself via JavaScript.
+        var jsBundleID: String?
+    }
+
+    /// Chromium-family browsers whose accessibility tree omits the font family. We
+    /// fall back to reading `getComputedStyle().fontFamily` from the page via the
+    /// Chrome AppleScript dictionary, which these all share.
+    private static let chromiumBrowsers: Set<String> = [
+        "com.google.Chrome", "com.google.Chrome.canary", "com.google.Chrome.beta",
+        "com.google.Chrome.dev", "com.microsoft.edgemac", "com.microsoft.edgemac.Beta",
+        "com.microsoft.edgemac.Dev", "com.brave.Browser", "com.brave.Browser.beta",
+        "com.brave.Browser.nightly", "com.vivaldi.Vivaldi", "org.chromium.Chromium",
+        "company.thebrowser.Browser", "com.operasoftware.Opera",
+    ]
+
+    private static func isChromium(_ bundleID: String?) -> Bool {
+        guard let b = bundleID else { return false }
+        return chromiumBrowsers.contains(b) || b.lowercased().contains("chrom")
+            || b.lowercased().contains("helium")
     }
 
     /// Begins picking. Returns `.needsPermission` (and triggers the system prompt)
@@ -205,10 +226,110 @@ final class FontPicker {
     }
 
     private func commit(atAX ax: CGPoint) {
-        if let hit = readText(atAX: ax) {
-            finish(hit.font)
-        } else {
+        guard let hit = readText(atAX: ax) else {
             finish(nil)  // clicked something that isn't text → dismiss
+            return
+        }
+        guard let bundleID = hit.jsBundleID else {
+            finish(hit.font)
+            return
+        }
+        // Chromium browser, unknown family: read the family from the page via JS. Run
+        // it off the main thread (a Process call), then finish on the main actor. If JS
+        // is unavailable (setting off / Automation denied) we keep the AX result.
+        let fallback = hit.font
+        Task.detached {
+            let js = Self.fontViaJS(bundleID: bundleID, screen: ax)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                guard let js, !js.family.isEmpty else {
+                    self.finish(fallback)
+                    return
+                }
+                self.finish(
+                    PickedFont(
+                        family: js.family,
+                        pointSize: js.size > 0 ? js.size : fallback.pointSize,
+                        weightName: js.weight ?? fallback.weightName,
+                        sampleSnippet: fallback.sampleSnippet))
+            }
+        }
+    }
+
+    // MARK: Reading the font from a Chromium page via JavaScript
+
+    /// Ask the browser for `getComputedStyle().fontFamily/Size/Weight` of the element
+    /// at the click point, converting screen → viewport coordinates inside the page.
+    /// Returns nil if JS-from-Apple-Events is off, Automation is denied, or it times out.
+    nonisolated static func fontViaJS(bundleID: String, screen: CGPoint) -> (
+        family: String, size: Double, weight: String?
+    )? {
+        let x = Int(screen.x.rounded()), y = Int(screen.y.rounded())
+        // No double-quotes or backslashes in the JS, so it drops cleanly into the
+        // AppleScript double-quoted string with no escaping.
+        let js =
+            "(function(){var x=\(x),y=\(y);"
+            + "var vx=x-window.screenX,vy=y-window.screenY-(window.outerHeight-window.innerHeight);"
+            + "var el=document.elementFromPoint(vx,vy);if(!el)return '';"
+            + "var s=getComputedStyle(el);"
+            + "return s.fontFamily+'|||'+s.fontSize+'|||'+s.fontWeight;})()"
+        let script =
+            "tell application id \"\(bundleID)\" to tell active tab of front window "
+            + "to execute javascript \"\(js)\""
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
+        proc.arguments = ["-e", script]
+        let out = Pipe()
+        proc.standardOutput = out
+        proc.standardError = Pipe()
+        do { try proc.run() } catch { return nil }
+        let deadline = Date().addingTimeInterval(2.5)
+        while proc.isRunning && Date() < deadline { usleep(15_000) }
+        if proc.isRunning {
+            proc.terminate()
+            return nil
+        }
+        guard proc.terminationStatus == 0 else { return nil }  // JS off / denied / error
+        let data = out.fileHandleForReading.readDataToEndOfFile()
+        guard
+            let result = String(data: data, encoding: .utf8)?
+                .trimmingCharacters(in: .whitespacesAndNewlines), !result.isEmpty
+        else { return nil }
+        let parts = result.components(separatedBy: "|||")
+        let family = firstFamily(parts.first ?? "")
+        guard !family.isEmpty else { return nil }
+        let size =
+            parts.count > 1 ? Double(parts[1].replacingOccurrences(of: "px", with: "")) ?? 0 : 0
+        let weight = parts.count > 2 ? weightLabel(parts[2]) : nil
+        return (family, size, weight)
+    }
+
+    /// First concrete family in a CSS font stack (`"Helvetica Neue", Arial, sans-serif`
+    /// → `Helvetica Neue`), mapping the system-font keywords to a friendly name.
+    nonisolated private static func firstFamily(_ stack: String) -> String {
+        guard let first = stack.split(separator: ",").first else { return "" }
+        let name = first.trimmingCharacters(in: CharacterSet(charactersIn: " '\""))
+        let systemKeywords = [
+            "-apple-system", "system-ui", "blinkmacsystemfont", "ui-sans-serif",
+            "ui-serif", "ui-monospace", "ui-rounded",
+        ]
+        if systemKeywords.contains(name.lowercased()) { return "System Font" }
+        return name
+    }
+
+    nonisolated private static func weightLabel(_ w: String) -> String? {
+        switch w.trimmingCharacters(in: .whitespaces) {
+        case "100": return "Thin"
+        case "200": return "Extralight"
+        case "300": return "Light"
+        case "400", "normal": return "Regular"
+        case "500": return "Medium"
+        case "600": return "Semibold"
+        case "700", "bold": return "Bold"
+        case "800": return "Extrabold"
+        case "900": return "Black"
+        default: return nil
         }
     }
 
@@ -258,7 +379,12 @@ final class FontPicker {
             pointSize: size,
             weightName: weight,
             sampleSnippet: text.isEmpty ? nil : String(text.prefix(60)))
-        return Hit(font: picked, frame: appKitFrame)
+
+        // Chromium's AX never reports the family — flag it so commit() reads the real
+        // family from the page via JavaScript.
+        let bundle = NSRunningApplication(processIdentifier: epid)?.bundleIdentifier
+        let jsBundle = (family == "Unknown" && Self.isChromium(bundle)) ? bundle : nil
+        return Hit(font: picked, frame: appKitFrame, jsBundleID: jsBundle)
     }
 
     /// Resolve an element to the AXStaticText run under an AX (top-left) point:
