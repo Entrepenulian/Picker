@@ -37,11 +37,12 @@ struct PickedFont: Identifiable, Codable, Equatable, Hashable {
         self.addedAt = addedAt
     }
 
-    /// Whether the family is actually installed locally — drives the "preview is
-    /// approximate" note, since SwiftUI silently falls back when it isn't.
+    /// Whether the real face is available to render — installed locally OR downloaded
+    /// and registered this run by `FontLoader`. Drives the "preview approximate" note.
+    /// Uses descriptor resolution (not `availableFontFamilies`, which doesn't list
+    /// process-registered fonts).
     var isInstalled: Bool {
-        NSFontManager.shared.availableFontFamilies
-            .contains { $0.caseInsensitiveCompare(family) == .orderedSame }
+        FontLoader.resolves(family)
     }
 
     /// Where to go to get the font. Google Fonts search is the best single
